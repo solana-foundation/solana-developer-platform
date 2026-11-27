@@ -1,4 +1,5 @@
 import type { EarnStrategy } from "@sdp/types/earn";
+import { earnStrategyParticipation } from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 import {
   earnDepositsNotOnPlan,
@@ -7,6 +8,7 @@ import {
 } from "./earn-surfacing";
 
 const strategy: EarnStrategy = {
+  ...earnStrategyParticipation("kamino"),
   id: "earn_strategy_live",
   provider: "kamino",
   providerReference: "Kvault11111111111111111111111111111111111",
@@ -95,9 +97,10 @@ describe("earnVaultDepositAvailability", () => {
     );
   });
 
-  it("offers Ondo USDY on production while its mirrored sandbox row stays browse-only", () => {
+  it("keeps hidden Ondo deposits unavailable even for an enabled organization", () => {
     const ondo = {
       ...strategy,
+      ...earnStrategyParticipation("ondo"),
       provider: "ondo",
       sourceKind: "rwa" as const,
       hostCluster: "mainnet-beta" as const,
@@ -108,16 +111,11 @@ describe("earnVaultDepositAvailability", () => {
       ondo: { entitled: true, configured: true, enabled: true },
     };
 
-    expect(earnVaultDepositAvailability(ondo, "production", access)).toBe("available");
+    expect(SURFACED_VAULT_DIRECT_EARN_PROVIDERS).not.toContain("ondo");
+    expect(earnVaultDepositAvailability(ondo, "production", access)).toBe("strategy_unavailable");
     expect(earnVaultDepositAvailability({ ...ondo, fundable: false }, "sandbox", access)).toBe(
       "cluster_unavailable"
     );
-    // Entitlement is still the org's: the flip offers the row, it grants nothing.
-    expect(
-      earnVaultDepositAvailability(ondo, "production", {
-        ondo: { entitled: false, configured: true, enabled: false },
-      })
-    ).toBe("provider_not_entitled");
   });
 
   it.each([

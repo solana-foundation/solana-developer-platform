@@ -1,21 +1,21 @@
 import { EARN_PROVIDER_CLIENTS as CATALOGUE_PROVIDER_CLIENTS, isEarnProviderId } from "@sdp/earn";
 import { providerNotConfigured } from "@sdp/earn/errors";
-import type { EarnRuntimeContext, EarnVaultProvider } from "@sdp/earn/types";
-import { HastraVaultDirectClient } from "@sdp/hastra/client";
-import { JupiterLendVaultDirectClient } from "@sdp/jupiter-lend/client";
-import { KaminoVaultDirectClient } from "@sdp/kamino/client";
-import { OndoVaultDirectClient } from "@sdp/ondo/client";
-import { PlumeVaultDirectClient } from "@sdp/plume/client";
-import type { EarnProviderId } from "@sdp/types/provider-access";
-import type { SolanaCluster } from "@sdp/types/well-known-tokens";
-import { VedaVaultDirectClient } from "@sdp/veda/client";
-import { WisdomTreeVaultDirectClient } from "@sdp/wisdomtree/client";
+import type {
+  EarnProvenRpcResolver,
+  EarnVaultOperationRunner,
+  EarnVaultProvider,
+} from "@sdp/earn/types";
+import { EARN_PROVIDERS, type EarnProviderId } from "@sdp/types/provider-access";
 import {
   assertClusterEndpoint,
   earnPoolNotConfigured,
   earnProviderEndpointUrls,
 } from "@/services/earn/cluster-rpc";
 import type { Env } from "@/types/env";
+import {
+  createEarnExecutionClient,
+  type EarnExecutionDependencies,
+} from "./earn/execution-factories";
 import { createHastraSwapPort } from "./earn/hastra-swap-port";
 import { createJupiterSwapPort } from "./earn/jupiter-swap-port";
 import { createVaultDeadline } from "./earn/vault-deadline";
@@ -25,41 +25,27 @@ import { createVaultDeadline } from "./earn/vault-deadline";
  * singleton provider performs any chain work. The cluster comes from the
  * request-scoped runtime, so one API process serves both SDP environments.
  */
-async function resolveProvenRpcUrl(
-  _ctx: EarnRuntimeContext,
-  cluster: SolanaCluster
-): Promise<string> {
+const resolveProvenRpcUrl: EarnProvenRpcResolver = async (_ctx, cluster) => {
   const [rpcUrl] = earnProviderEndpointUrls(cluster);
   if (rpcUrl === undefined) throw earnPoolNotConfigured(cluster);
   await assertClusterEndpoint(cluster, rpcUrl);
   return rpcUrl;
-}
+};
 
 /** One fresh deadline per operation, since these clients are process singletons. */
-function runVaultOperation<T>(
-  label: string,
-  operation: (assertActive: () => void) => Promise<T>
-): Promise<T> {
+const runVaultOperation: EarnVaultOperationRunner = (label, operation) => {
   const deadline = createVaultDeadline();
   return deadline.run(label, () => operation(() => deadline.assertActive(label)));
-}
+};
 
-const kamino = new KaminoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
-const jupiterLend = new JupiterLendVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
-
-const veda = new VedaVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
-const plume = new PlumeVaultDirectClient(runVaultOperation);
-const wisdomtree = new WisdomTreeVaultDirectClient(resolveProvenRpcUrl, runVaultOperation);
-
-// The swap port is resolved per request from the runtime context (the API
-// constructs `ctx.env` from `Env`), because these are process singletons and
-// the Jupiter credential is request-environment state, same as the RPC URL.
-const ondo = new OndoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
-  createJupiterSwapPort(ctx.env as unknown as Env, "Jupiter swaps")
-);
-const hastra = new HastraVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
-  createHastraSwapPort(ctx.env as unknown as Env)
-);
+const singletonDependencies: EarnExecutionDependencies = {
+  resolveProvenRpcUrl,
+  runOperation: runVaultOperation,
+  // SAFETY: earnRuntime passes the deployment Env unchanged at this API boundary.
+  resolveJupiterSwapPort: (ctx) => createJupiterSwapPort(ctx.env as Env, "Jupiter swaps"),
+  // SAFETY: these singletons resolve the current request's Env only when the port is used.
+  resolveHastraSwapPort: (ctx) => createHastraSwapPort(ctx.env as Env),
+};
 
 /**
  * API composition root for Earn providers.
@@ -70,16 +56,13 @@ const hastra = new HastraVaultDirectClient(resolveProvenRpcUrl, runVaultOperatio
  * supersets and leaves the rest alone. Routes must resolve through this registry
  * when they need provider capabilities.
  */
-export const EARN_PROVIDER_CLIENTS = {
+export const EARN_PROVIDER_CLIENTS: Record<EarnProviderId, EarnVaultProvider> = {
   ...CATALOGUE_PROVIDER_CLIENTS,
-  kamino,
-  jupiter_lend: jupiterLend,
-  veda,
-  ondo,
-  hastra,
-  wisdomtree,
-  plume,
-} as const satisfies Record<EarnProviderId, EarnVaultProvider>;
+};
+for (const provider of EARN_PROVIDERS) {
+  const client = createEarnExecutionClient(provider, singletonDependencies);
+  if (client !== null) EARN_PROVIDER_CLIENTS[provider] = client;
+}
 
 export function resolveEarnProviderClient(provider: string): EarnVaultProvider {
   if (!isEarnProviderId(provider)) {

@@ -13,7 +13,10 @@ import {
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
 import { app } from "@/index";
-import { earnPositionsResponseSchema } from "@/openapi/schemas/earn-core";
+import {
+  earnDiscoveryResponseSchema,
+  earnPositionsResponseSchema,
+} from "@/openapi/schemas/earn-core";
 import {
   projectEarnOperation,
   projectEarnOperations,
@@ -258,12 +261,17 @@ describe("Earn core read contracts", () => {
       `discovery?id=${row.id}&provider=veda&depositMint=${TOKEN}&minApy=0.05`
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const payload = earnDiscoveryResponseSchema.parse(await response.json());
+    expect(payload).toMatchObject({
       data: {
         total: 1,
         strategies: [
           {
             id: row.id,
+            requiresKyc: null,
+            requiresKyb: null,
+            geographicallyRestricted: true,
+            termsUrl: "https://veda.tech/terms",
             rate: { value: "0.06", measure: "apy", observedAt: "2026-11-18T09:00:00.000Z" },
             capabilities: { admission: "evaluated_on_prepare" },
           },
@@ -303,6 +311,31 @@ describe("Earn core read contracts", () => {
         ],
       },
     });
+  });
+
+  it("retains strategy requirements across metrics refresh and exposes their exact values", async () => {
+    const participation = {
+      requiresKyc: true,
+      requiresKyb: false,
+      geographicallyRestricted: null,
+      termsUrl: "https://example.com/vault-terms",
+    };
+    const row = await seedStrategy("strategy-specific-requirements", {
+      riskMetadata: { participation },
+    });
+    await createPostgresEarnRepository(getDb(env)).updateStrategyMetrics({
+      provider: "veda",
+      providerReference: row.provider_reference,
+      environment: "sandbox",
+      currentApy: "0.07",
+      riskMetadata: { tvlUsd: 100 },
+    });
+    const response = await get(`discovery?id=${row.id}`);
+    expect(response.status).toBe(200);
+    const payload = earnDiscoveryResponseSchema.parse(await response.json());
+    expect(payload.data.strategies).toHaveLength(1);
+    expect(payload.data.strategies[0]).toMatchObject(participation);
+    expect(readVaultPositions).not.toHaveBeenCalled();
   });
 
   it("keeps owner-address reads exact-project scoped", async () => {

@@ -7,6 +7,13 @@ import {
   type CustodyProvider,
 } from "./custody";
 import { EARN_EXECUTION_MODELS } from "./earn";
+import {
+  type EarnStrategyParticipation,
+  type EarnStrategyParticipationOverrides,
+  earnStrategyParticipationOverridesSchema,
+  earnStrategyParticipationSchema,
+  UNKNOWN_EARN_STRATEGY_PARTICIPATION,
+} from "./earn-participation";
 import { HASTRA_DEPLOYMENTS } from "./hastra-programs";
 import { JUPITER_LEND_EARN_PROGRAM_IDS } from "./jupiter-lend-programs";
 import { KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT, KAMINO_KVAULT_PROGRAM_IDS } from "./kamino-programs";
@@ -149,6 +156,8 @@ export interface EarnProviderDescriptor {
    * catalogue sync and metrics refresh continue independently of surfacing.
    */
   readonly surfaced: boolean;
+  /** Informational provider defaults; strategy facts may override them. */
+  readonly participation: EarnStrategyParticipation;
   /** How money reaches the provider's vault; see `EARN_DEPOSIT_STYLES`. */
   readonly depositStyle: EarnDepositStyle;
   /**
@@ -227,6 +236,7 @@ function deployedClusters(
  */
 const UNIMPLEMENTED_PROVIDER = {
   surfaced: false,
+  participation: UNKNOWN_EARN_STRATEGY_PARTICIPATION,
   depositStyle: "vault_direct",
   depositSettlement: "atomic",
   withdrawalSettlement: "atomic",
@@ -248,6 +258,12 @@ export const EARN_PROVIDER_DESCRIPTORS = {
     // Surfacing decides whether rows REACH customers,
     // never whether any exist.
     surfaced: true,
+    participation: {
+      requiresKyc: null,
+      requiresKyb: null,
+      geographicallyRestricted: true,
+      termsUrl: "https://veda.tech/terms",
+    },
     // Implemented: a non-custodial BoringVault deposit signed from the
     // organization's custody wallet, same shape as Kamino. Not a stub's
     // placeholder — `@sdp/veda` builds the instruction and implements no
@@ -260,10 +276,32 @@ export const EARN_PROVIDER_DESCRIPTORS = {
     withdrawSlippageFloor: { defaultToleranceBps: 10 },
     deployedClusters: deployedClusters(VEDA_DEPLOYMENTS),
   },
-  upshift: UNIMPLEMENTED_PROVIDER,
-  perena: UNIMPLEMENTED_PROVIDER,
+  upshift: {
+    ...UNIMPLEMENTED_PROVIDER,
+    participation: {
+      requiresKyc: null,
+      requiresKyb: null,
+      geographicallyRestricted: true,
+      termsUrl: "https://docs.upshift.finance/resources/legal/terms-of-use",
+    },
+  },
+  perena: {
+    ...UNIMPLEMENTED_PROVIDER,
+    participation: {
+      requiresKyc: null,
+      requiresKyb: null,
+      geographicallyRestricted: true,
+      termsUrl: "https://perena.gitbook.io/perena/legal/terms-of-use",
+    },
+  },
   kamino: {
     surfaced: true,
+    participation: {
+      requiresKyc: null,
+      requiresKyb: null,
+      geographicallyRestricted: true,
+      termsUrl: "https://kamino.com/terms",
+    },
     depositStyle: "vault_direct",
     depositSettlement: "atomic",
     withdrawalSettlement: "atomic",
@@ -284,6 +322,13 @@ export const EARN_PROVIDER_DESCRIPTORS = {
     // visible in both product catalogues; the sandbox copy is browse-only while
     // production projects may execute against the mainnet program.
     surfaced: true,
+    participation: {
+      requiresKyc: null,
+      requiresKyb: null,
+      geographicallyRestricted: true,
+      // Provider terms; Lend also presents product service terms in its app.
+      termsUrl: "https://developers.jup.ag/docs/legal/terms-of-use",
+    },
     depositStyle: "vault_direct",
     depositSettlement: "atomic",
     withdrawalSettlement: "atomic",
@@ -293,14 +338,17 @@ export const EARN_PROVIDER_DESCRIPTORS = {
     deployedClusters: deployedClusters(JUPITER_LEND_EARN_PROGRAM_IDS),
   },
   ondo: {
-    // Surfaced 2026-09-14 (PRO-1832), registered dormant 2026-09-02 (PRO-1803).
-    // Mainnet-only like Jupiter Lend: the production catalogue carries the USDY
-    // row and production projects may execute against it (the deposit is a
-    // Jupiter-routed USDC→USDY swap, `@sdp/ondo`); the sandbox copy arrives
-    // through the PRO-1742 mirror, browse-only. The `currentApy` source is the
-    // issuer's public assets API (PRO-1833); no figure is derived from token price
-    // or wallet balances.
-    surfaced: true,
+    // Hidden while new USDY exposure is paused. Catalogue and metrics sync keep
+    // running; existing positions retain the reverse-swap withdrawal adapter.
+    // The production catalogue carries mainnet USDY and the sandbox mirror
+    // remains stored. Re-enabling this flag needs no catalogue reset.
+    surfaced: false,
+    participation: {
+      requiresKyc: null,
+      requiresKyb: null,
+      geographicallyRestricted: true,
+      termsUrl: "https://docs.ondo.finance/legal/terms-of-service",
+    },
     // Non-custodial like Kamino/Veda, though the "vault" is the open market:
     // the deposit is a custody-signed USDC→USDY swap and the position is the
     // USDY balance in the organization's own wallet. There is no address to
@@ -326,6 +374,12 @@ export const EARN_PROVIDER_DESCRIPTORS = {
     // review. Flip this last, per the Earn provider playbook; exits stay
     // registered while it is false.
     surfaced: false,
+    participation: {
+      requiresKyc: null,
+      requiresKyb: null,
+      geographicallyRestricted: true,
+      termsUrl: "https://hastra.io/terms",
+    },
     // One owner-signed transaction performs USDC -> wYLDS -> PRIME. Hastra does
     // not expose a deposit address and never takes custody of the signing key.
     depositStyle: "vault_direct",
@@ -355,6 +409,12 @@ export const EARN_PROVIDER_DESCRIPTORS = {
     // is Solana-mainnet-only, so that E2E is blocked on production vault deposits
     // opening (PRO-1703) and on real WisdomTree Connect credentials.
     surfaced: false,
+    participation: {
+      requiresKyc: true,
+      requiresKyb: true,
+      geographicallyRestricted: true,
+      termsUrl: "https://app.wisdomtreeconnect.com/web/order/terms-and-conditions",
+    },
     // WisdomTree's on-receipt deposit wallet LOOKS like a fundable address, but
     // presenting it as one would strand money: attribution runs through the
     // SENDING wallet's KYC registration, so USDC from an unregistered wallet is
@@ -374,6 +434,12 @@ export const EARN_PROVIDER_DESCRIPTORS = {
   plume: {
     // Enable only after live cross-chain settlement and recovery validation.
     surfaced: false,
+    participation: {
+      requiresKyc: null,
+      requiresKyb: null,
+      geographicallyRestricted: true,
+      termsUrl: "https://docs.nest.credit/security-and-compliance/terms-and-conditions",
+    },
     depositStyle: "vault_direct",
     depositSettlement: "provider_order",
     withdrawalSettlement: "provider_order",
@@ -428,6 +494,25 @@ export const EARN_PROVIDER_DEPOSIT_FLOOR_SUPPORT = descriptorColumn("depositFloo
 export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = descriptorColumn("withdrawSlippageFloor");
 /** Clusters SDP can execute against (`EarnProviderDescriptor.deployedClusters`). */
 export const EARN_PROVIDER_DEPLOYED_CLUSTERS = descriptorColumn("deployedClusters");
+
+/**
+ * Resolve strategy facts over provider defaults without consulting live admission.
+ * Unknown providers inherit unknown requirements, never unrestricted access.
+ */
+export function earnStrategyParticipation(
+  provider: string,
+  overrides?: EarnStrategyParticipationOverrides
+): EarnStrategyParticipation {
+  const defaults =
+    earnProviderDescriptor(provider)?.participation ?? UNKNOWN_EARN_STRATEGY_PARTICIPATION;
+  if (overrides === undefined) return earnStrategyParticipationSchema.parse(defaults);
+  const parsed = earnStrategyParticipationOverridesSchema.parse(overrides);
+  // Optional undefined fields inherit; explicit null and false override defaults.
+  const defined = Object.fromEntries(
+    Object.entries(parsed).filter(([, value]) => value !== undefined)
+  );
+  return earnStrategyParticipationSchema.parse({ ...defaults, ...defined });
+}
 
 /** Unknown providers fail closed because atomicity is a positive settlement claim. */
 export function earnProviderDepositSettlement(provider: string): EarnMovementSettlement {

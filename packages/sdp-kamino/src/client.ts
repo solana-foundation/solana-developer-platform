@@ -1,11 +1,13 @@
 import { KaminoEarnClient } from "@sdp/earn/providers/kamino/client";
 import type {
+  EarnProvenRpcResolver,
   EarnRuntimeContext,
   EarnVaultDepositInput,
   EarnVaultDepositQuote,
   EarnVaultDepositQuoteInput,
   EarnVaultDepositQuoteProvider,
   EarnVaultInstruction,
+  EarnVaultOperationRunner,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultTransactionPlan,
@@ -28,16 +30,6 @@ import {
   readKaminoPositions,
 } from "./sdk";
 import type { KaminoInstructionPlan, KaminoRuntime } from "./types";
-
-/**
- * API-owned execution guard for one provider operation. The API injects its
- * absolute vault deadline here without creating a dependency from this package
- * back to the application layer.
- */
-export type KaminoVaultOperationRunner = <T>(
-  label: string,
-  operation: (assertActive: () => void) => Promise<T>
-) => Promise<T>;
 
 /** Convert the kit-native plan to the dependency-free Earn wire contract. */
 export function toEarnVaultTransactionPlan(plan: KaminoInstructionPlan): EarnVaultTransactionPlan {
@@ -102,11 +94,8 @@ export class KaminoVaultDirectClient
    * route has to remember.
    */
   constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
-    private readonly runOperation: KaminoVaultOperationRunner
+    private readonly resolveProvenRpcUrl: EarnProvenRpcResolver,
+    private readonly runOperation: EarnVaultOperationRunner
   ) {
     super();
   }

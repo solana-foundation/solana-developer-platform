@@ -2,6 +2,7 @@
 
 import type { SdpEnvironment } from "@sdp/types/api-keys";
 import type { EarnStrategy } from "@sdp/types/earn";
+import { earnStrategyParticipation } from "@sdp/types/provider-access";
 import type { SolanaCluster } from "@sdp/types/well-known-tokens";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -15,6 +16,7 @@ import {
 } from "./earn-integration-snippets";
 
 const liveStrategy: EarnStrategy = {
+  ...earnStrategyParticipation("kamino"),
   id: "earn_strategy_live",
   provider: "kamino",
   providerReference: "Kvault11111111111111111111111111111111111",
@@ -56,6 +58,7 @@ const secondLiveStrategy: EarnStrategy = {
 /** Jupiter deposits are production-only; its sandbox mirror is browse-only. */
 const productionOnlyStrategy: EarnStrategy = {
   ...liveStrategy,
+  ...earnStrategyParticipation("jupiter_lend"),
   id: "earn_strategy_jupiter",
   provider: "jupiter_lend",
   providerReference: "JupiterUSDT111111111111111111111111111111",
@@ -69,6 +72,7 @@ const productionOnlyStrategy: EarnStrategy = {
 /** Veda PRIME supports production; its devnet Test Vault remains fundable. */
 const vedaPrimeStrategy: EarnStrategy = {
   ...liveStrategy,
+  ...earnStrategyParticipation("veda"),
   id: "earn_strategy_veda",
   provider: "veda",
   providerReference: "VedaVault1111111111111111111111111111111111",

@@ -2,9 +2,14 @@ import { badRequest } from "@sdp/earn/errors";
 import { WisdomTreeEarnClient } from "@sdp/earn/providers/wisdomtree/client";
 import { getWisdomTreeOnReceiptWallet } from "@sdp/earn/providers/wisdomtree/connect";
 import type {
+  EarnProvenRpcResolver,
+  EarnProviderSettlementCandidate,
+  EarnProviderSettlementInput,
+  EarnProviderSettlementProvider,
   EarnRuntimeContext,
   EarnVaultDepositInput,
   EarnVaultInstruction,
+  EarnVaultOperationRunner,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultProviderOrderWithdrawProvider,
@@ -29,13 +34,8 @@ import { SdpWisdomTreeError } from "./errors";
 import { permittedPlanPrograms } from "./guards";
 import { buildWisdomTreeDepositPlan, buildWisdomTreeRedemptionPlan } from "./plan";
 import { readWisdomTreePosition } from "./positions";
+import { readWisdomTreeSettlement } from "./settlement";
 import type { WisdomTreeInstructionPlan, WisdomTreeRuntime } from "./types";
-
-/** Same API-owned execution guard shape as `KaminoVaultOperationRunner`. */
-export type WisdomTreeVaultOperationRunner = <T>(
-  label: string,
-  operation: (assertActive: () => void) => Promise<T>
-) => Promise<T>;
 
 /** Convert the kit-native plan to the dependency-free Earn wire contract. */
 export function toEarnVaultTransactionPlan(
@@ -76,17 +76,14 @@ export function toEarnVaultTransactionPlan(
  */
 export class WisdomTreeVaultDirectClient
   extends WisdomTreeEarnClient
-  implements EarnVaultProviderOrderWithdrawProvider
+  implements EarnVaultProviderOrderWithdrawProvider, EarnProviderSettlementProvider
 {
   /** The redemption transaction transfers shares; WisdomTree pays USDC later. */
   readonly vaultWithdrawalSettlement = EARN_PROVIDER_DESCRIPTORS.wisdomtree.withdrawalSettlement;
 
   constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
-    private readonly runOperation: WisdomTreeVaultOperationRunner,
+    private readonly resolveProvenRpcUrl: EarnProvenRpcResolver,
+    private readonly runOperation: EarnVaultOperationRunner,
     /** Test seam: builders read the chain through this factory. */
     private readonly createReader: (
       rpcUrl: string
@@ -136,6 +133,19 @@ export class WisdomTreeVaultDirectClient
       );
     }
     return fund;
+  }
+
+  async readProviderSettlement(
+    ctx: EarnRuntimeContext,
+    input: EarnProviderSettlementInput
+  ): Promise<EarnProviderSettlementCandidate> {
+    return this.runOperation("Reading WisdomTree order settlement", (assertActive) => {
+      const fund = this.fundFor(
+        input.providerReference,
+        CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment]
+      );
+      return readWisdomTreeSettlement(ctx, input, fund, assertActive);
+    });
   }
 
   /** See `EarnVaultDirectProvider.sponsoredPrograms` — the enforced set IS the declared set. */

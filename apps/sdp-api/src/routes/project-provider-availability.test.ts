@@ -127,7 +127,7 @@ const EARN_AVAILABILITY: ProjectProviderAvailabilityEntry[] = [
   { family: "earn", provider: "perena", available: false, reason: "provider_not_offered" },
   { family: "earn", provider: "kamino", available: false, reason: "provider_not_entitled" },
   { family: "earn", provider: "jupiter_lend", available: false, reason: "provider_not_entitled" },
-  { family: "earn", provider: "ondo", available: false, reason: "provider_not_entitled" },
+  { family: "earn", provider: "ondo", available: false, reason: "provider_not_offered" },
   { family: "earn", provider: "hastra", available: false, reason: "provider_not_offered" },
   { family: "earn", provider: "wisdomtree", available: false, reason: "provider_not_offered" },
   { family: "earn", provider: "plume", available: false, reason: "provider_not_offered" },

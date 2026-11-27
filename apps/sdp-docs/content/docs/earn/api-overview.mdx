@@ -56,6 +56,10 @@ One yield product that you can deposit into. Discovery returns a page of these:
   "shareMint": "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2",
   "liquidityTerm": "instant",
   "fundable": true,
+  "requiresKyc": null,
+  "requiresKyb": null,
+  "geographicallyRestricted": true,
+  "termsUrl": "https://kamino.com/terms",
   "rate": { "value": "0.062", "observedAt": "2026-11-20T14:00:00.000Z" },
   "capabilities": { "deposit": true, "withdraw": true }
 }
@@ -69,8 +73,14 @@ One yield product that you can deposit into. Discovery returns a page of these:
 | `rate.value` | The provider-reported APY as a decimal fraction: `"0.062"` is 6.2%. `null` is unknown. |
 | `liquidityTerm` | `instant`, or `delayed` when withdrawals queue. |
 | `capabilities.deposit`, `fundable` | When both are `true`, it takes deposits. |
+| `requiresKyc`, `requiresKyb` | Individual/business verification requirements: `true`, `false`, or `null` when unknown or conditional. |
+| `geographicallyRestricted` | Published geographic restrictions: `true`, `false`, or `null` when unknown or conditional. |
+| `termsUrl` | HTTPS provider/product terms link, or `null` when unverified. |
 
-More on choosing one in [Strategies](/docs/earn/strategies).
+Participation fields are always present. They describe requirements, not a
+customer's approval, an SDP geography check or terms acceptance. A terms link
+is a starting point; additional product agreements may apply. More on choosing
+one in [Strategies](/docs/earn/strategies).
 
 ## Position
 

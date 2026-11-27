@@ -18,7 +18,7 @@ Companion docs:
 
 - [Core API design](../../docs/architecture/earn-core-api-proposal.md)
 - [Threat model](https://www.notion.so/422d36dad52d81e2bcf2cbd62c8e4622)
-- [Provider playbook](../../docs/contributing/earn-pluggability-playbook.md)
+- [Provider playbook](src/providers/AGENTS.md)
 - [Historical V1 design](../../docs/architecture/earn-v1-data-flow.md)
 
 ## Strategy actions and wallet signing
@@ -137,12 +137,8 @@ refresh is update-only.
   capability (`supportsLiveMetrics`), pulls the whole shelf's current figures in
   one or two calls and rewrites `current_apy` plus volatile `risk_metadata`
   (TVL, holders) on rows the catalogue already holds.
-- **When it runs:** every 5 minutes as the `refresh-earn-metrics` Cron
-  Definition behind `isEarnEnabled`, once per environment (`scope: "cluster"`):
-  each registration refreshes its own environment's shelf and guards its
-  cluster's deposit mints. Unslotted: duplicates only rewrite the same figures. It logs its own `sdp_cron_run`, and that is the point: "the
-  refresh silently stopped running" is this pass's worst failure (rates quietly
-  go stale) and is invisible from the catalogue sync's run events.
+- **Cadence:** see the
+  [provider maintenance guide](src/providers/AGENTS.md#when-changes-appear).
 - **What it cannot do**, and this is the whole safety argument:
   - **Insert.** The normal path uses one `updateStrategyMetricsBatch` per
     provider/environment and falls back to `updateStrategyMetrics` per row only
@@ -177,20 +173,12 @@ refresh is update-only.
   reference both sources list stays on the own (fundable) shelf: the mirror
   under-reports it, warned hourly (ADR 0002, PRO-1742 addendum: this caps a
   fully-faithful mirror to cluster-distinct, address-keyed references).
-- **When it runs:** once per hourly Redis slot (scheduled `*/5 * * * *`, so a
-  slot that a cron service boot claimed mid-hour is retaken five minutes after it
-  expires) and once when the cron service starts, as
-  the `sync-earn-catalogue` Cron Definition behind `isEarnEnabled`
-  (`apps/sdp-api/src/cron/earn-catalogue-sync.ts`, ADR 0011). Every run claims
-  an hourly Redis slot first (`runEarnCatalogueSyncIfDue`), so a boot run and
-  the scheduled run never both sync in one window. Completely inert in a
-  flag-off environment.
+- **Cadence and visibility timing:** see the
+  [provider maintenance guide](src/providers/AGENTS.md#when-changes-appear).
 - **Failure behaviour:** per-provider isolation. `NOT_IMPLEMENTED` and
   `PROVIDER_NOT_CONFIGURED` are info-level skips (that is the normal state for
   the stub providers); any other error is logged for that provider and never
   sinks the others.
-- **Adding a provider needs no cron change** — it is registry-driven.
-- **To change cadence:** edit the definition's `schedule`.
 - **An operator stop outranks the sync.** The upsert never overwrites a
   `paused`/`deprecated` status, so an emergency pause holds until someone writes
   the status back to `active` — a sync pass can no longer resurrect it. Metadata
@@ -253,34 +241,12 @@ threat model EARN-010).
    provider metadata, and the API owns product visibility independently from
    the sync's complete persisted inventory.
 
-## Adding a provider (the 30-second version)
+## Provider changes
 
-The compiler and tests enforce most of this; the
-[playbook](../../docs/contributing/earn-pluggability-playbook.md) has the full
-walk:
-
-1. Add the id to `EARN_PROVIDERS` (`@sdp/types/provider-access`) — every
-   `satisfies Record<EarnProviderId, …>` now errors until you finish.
-2. Subclass `StubEarnClient` in `providers/<id>/client.ts`; register it in
-   `EARN_PROVIDER_CLIENTS`; add the package.json subpath export (a
-   registry-consistency test fails if you forget).
-3. Choose availability explicitly. A credentialed provider adds its key pair
-   to `env.d.ts`, `turbo.json`, `scripts/secret-keys.mjs`, and managed secret
-   projection. A public/on-chain provider joins the deliberate keyless set and
-   adds no placeholder secret.
-4. Implement `listStrategies` first, then only the capabilities needed by
-   current strategy actions. Catalogue sync picks it up through the registry.
-   Do not restore program or automated-allocation contracts.
-5. Tests are no-network by design: stub `fetch` per the canonical pattern in
-   `src/fetch.test.ts`.
-6. If SDP executes for the provider (vault-direct): the executing client in
-   its own package (`packages/sdp-<id>`), the per-cluster deployment registry
-   in `@sdp/types`, both API registry entries, and the three Kora sponsorship
-   allowlists. Also test owner-paid and caller-provided `feePayer` builds, and
-   publish every quote the provider requires in OpenAPI (playbook §4d).
-
-Curators and vaults are catalogue data. New closed category values require one
-shared type-registry update; see the playbook for each exact change shape.
+Use the single [provider maintenance guide](src/providers/AGENTS.md) for
+required provider evidence, registration, offering changes, propagation timing
+and verification. Keep the procedures there rather than adding a second
+checklist here.
 
 ## Testing
 

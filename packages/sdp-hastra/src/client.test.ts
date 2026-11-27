@@ -1234,6 +1234,48 @@ describe("Hastra positions and deployment guardrails", () => {
     ]);
   });
 
+  it("keeps PRIME holdings without a value while Hastra's oracle is reset", async () => {
+    const fixture = fixtureState();
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.primeMint, OWNER, 100_000_000n),
+    });
+    const price = fixture.accounts.get(fixture.addresses.stakePriceConfig);
+    if (!price) throw new Error("test premise: Hastra price config exists");
+    // update_price_config clears both fields until the next verified report.
+    price.data.fill(0, 136, 152);
+    price.data.fill(0, 160, 168);
+    stubRpc(fixture.accounts);
+    const [position] = await makeClient().readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [],
+    });
+    expect(position).toMatchObject({ shares: "100", withdrawableShares: "100" });
+    expect(position?.tokenValue).toBeUndefined();
+  });
+
+  it("keeps a known zero PRIME value and held wYLDS while Hastra's oracle is reset", async () => {
+    const fixture = fixtureState();
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.wYldsMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.wYldsMint, OWNER, 2_000_000n),
+    });
+    const price = fixture.accounts.get(fixture.addresses.stakePriceConfig);
+    if (!price) throw new Error("test premise: Hastra price config exists");
+    price.data.fill(0, 136, 152);
+    price.data.fill(0, 160, 168);
+    stubRpc(fixture.accounts);
+    const [position] = await makeClient().readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [],
+    });
+    expect(position).toMatchObject({
+      shares: "0",
+      tokenValue: "0",
+      parIntermediate: { amount: "2", tokenValue: "2" },
+    });
+  });
+
   it("keeps frozen PRIME in holdings without claiming it is withdrawable", async () => {
     const fixture = fixtureState();
     fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {

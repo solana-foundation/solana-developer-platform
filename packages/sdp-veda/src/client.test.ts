@@ -5,6 +5,7 @@ import {
   supportsVaultWithdraw,
   supportsVaultWithdrawQuote,
 } from "@sdp/earn/capabilities";
+import type { EarnVaultOperationRunner } from "@sdp/earn/types";
 import type { VedaDeployment } from "@sdp/types/veda-programs";
 import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +14,6 @@ import {
   toEarnVaultTransactionPlan,
   VEDA_POSITION_READ_CONCURRENCY,
   VedaVaultDirectClient,
-  type VedaVaultOperationRunner,
 } from "./client";
 import { SdpVedaError } from "./errors";
 import { toClusterConfig } from "./programs";
@@ -82,7 +82,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-const runOperation: VedaVaultOperationRunner = (_label, operation) => operation(() => undefined);
+const runOperation: EarnVaultOperationRunner = (_label, operation) => operation(() => undefined);
 const client = new VedaVaultDirectClient(async () => "https://rpc.test.invalid", runOperation);
 const sandbox = { env: {}, environment: "sandbox" } as const;
 
@@ -412,7 +412,7 @@ describe("readVaultPositions", () => {
 
   it("stops dequeuing vaults once the caller's deadline has expired", async () => {
     let elapsed = false;
-    const deadlined: VedaVaultOperationRunner = (_label, operation) =>
+    const deadlined: EarnVaultOperationRunner = (_label, operation) =>
       operation(() => {
         if (elapsed) throw new SdpVedaError("VAULT_UNREADABLE", "deadline elapsed");
       });

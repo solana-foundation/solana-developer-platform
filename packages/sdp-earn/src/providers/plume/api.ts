@@ -33,9 +33,7 @@ export const plumeVaultInfoSchema = z.object({
 export const plumePriceSchema = z.object({ price: z.number().finite().positive() });
 export const plumeTransactionSchema = z.object({ txBase64: z.string().min(1) });
 const delivery = z.object({ signature: z.string().nullish() }).nullish();
-const flowError = z
-  .object({ code: z.string().optional(), message: z.string().optional() })
-  .nullish();
+const flowError = z.object({ code: z.string().nullish(), message: z.string().nullish() }).nullish();
 export const plumeMintStatusSchema = z
   .object({
     solanaSignature: z.string(),

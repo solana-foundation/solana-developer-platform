@@ -1,3 +1,4 @@
+import { earnStrategyParticipationSchema } from "@sdp/types/earn-participation";
 import { z } from "zod";
 import { errorResponseSchema, isoDateTimeSchema, successResponseSchema } from "./base";
 import {
@@ -36,6 +37,7 @@ const earnStrategySlippagePolicySchema = z
 
 const earnStrategySchema = z
   .object({
+    ...earnStrategyParticipationSchema.shape,
     id: z.string().openapi({
       description: "The strategy's ID. Pass it as `strategyId` to prepare a deposit.",
       example: EARN_EXAMPLE_IDS.strategy,
@@ -186,7 +188,9 @@ export const earnWalletPositionSchema = z
         "or a withdrawal quote for the whole position for quote-based providers " +
         "such as Veda and Ondo. A quote already includes spread and price " +
         "impact, so it does not scale to other share amounts. It is a " +
-        "deposit-token amount, not a share count or a USD conversion; no USD conversion is implied. Absent when the live read is unavailable.",
+        "deposit-token amount, not a share count or a USD conversion; no USD conversion is implied. " +
+        "Absent when the live read or conversion rate is unavailable, including an uninitialized " +
+        "or reset Hastra price. Shares remain visible when only their value is unavailable.",
     }),
     parIntermediate: z
       .object({

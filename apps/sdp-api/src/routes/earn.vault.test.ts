@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { supportsVaultDepositQuote } from "@sdp/earn/capabilities";
+import { providerNotConfigured } from "@sdp/earn/errors";
 import { hashString } from "@sdp/payments/hash";
 import type { CustodyProvider } from "@sdp/types/custody";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
@@ -16,6 +17,7 @@ import { serviceUnavailable } from "@/lib/errors";
 import { resolveEarnExecutionClient } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import type { WalletDepositBuildInput } from "@/services/earn/vault-wallet.service";
+import * as providerAvailability from "@/services/provider-availability.service";
 import { ALL_API_KEY_GRANTS } from "@/test/fixtures/api-keys";
 import { recordCallScopes } from "@/test/helpers/cluster-scope";
 import { seedTestCustodyRows } from "@/test/helpers/custody";
@@ -442,21 +444,21 @@ describe("POST /v1/earn/deposit custody preparation admission", () => {
   it("refuses an unavailable provider configuration before building", async () => {
     await seedAuth();
     await seedProductionConnectionWallet({
-      connectionId: "cconn_ondo",
-      credentialId: "pcred_ondo",
-      custodyWalletId: "cwlt_ondo",
-      providerWalletId: "wallet_ondo",
+      connectionId: "cconn_unavailable",
+      credentialId: "pcred_unavailable",
+      custodyWalletId: "cwlt_unavailable",
+      providerWalletId: "wallet_unavailable",
     });
     const strategy = await seedStrategy({
-      provider: "ondo",
-      providerReference: USDY_MINT,
       hostCluster: "mainnet-beta",
       environment: "production",
     });
-    env.JUPITER_SWAP_API_KEY = undefined;
+    vi.spyOn(providerAvailability, "assertProviderAvailable").mockRejectedValueOnce(
+      providerNotConfigured("Provider configuration is unavailable")
+    );
     const res = await post(
       "deposit",
-      deposit(strategy.id, "cwlt_ondo"),
+      deposit(strategy.id, "cwlt_unavailable"),
       crypto.randomUUID(),
       PROD_API_KEY.raw
     );
@@ -465,7 +467,41 @@ describe("POST /v1/earn/deposit custody preparation admission", () => {
     expect(build).not.toHaveBeenCalled();
   });
 
-  it.each(["kamino", "jupiter_lend", "ondo"] as const)(
+  it.each([true, false])(
+    "refuses paused Ondo before building with Jupiter configured=%s",
+    async (configured) => {
+      await seedAuth();
+      await seedProductionConnectionWallet({
+        connectionId: "cconn_ondo",
+        credentialId: "pcred_ondo",
+        custodyWalletId: "cwlt_ondo",
+        providerWalletId: "wallet_ondo",
+      });
+      const strategy = await seedStrategy({
+        provider: "ondo",
+        providerReference: USDY_MINT,
+        hostCluster: "mainnet-beta",
+        environment: "production",
+      });
+      env.JUPITER_SWAP_API_KEY = configured ? "jup_test_key" : undefined;
+      const res = await post(
+        "deposit",
+        deposit(strategy.id, "cwlt_ondo"),
+        crypto.randomUUID(),
+        PROD_API_KEY.raw
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: {
+          code: "BAD_REQUEST",
+          details: { reason: "catalogue_only", strategyId: strategy.id },
+        },
+      });
+      expect(build).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["kamino", "jupiter_lend", "veda"] as const)(
     "prepares %s from production with server-derived review terms",
     async (provider) => {
       await seedAuth();
@@ -478,8 +514,7 @@ describe("POST /v1/earn/deposit custody preparation admission", () => {
       env.JUPITER_SWAP_API_KEY = "jup_test_key";
       const strategy = await seedStrategy({
         provider,
-        providerReference:
-          provider === "ondo" ? USDY_MINT : "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+        providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
         hostCluster: "mainnet-beta",
         environment: "production",
       });

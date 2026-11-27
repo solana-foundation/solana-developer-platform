@@ -1,5 +1,6 @@
 import type { EarnVaultPosition, EarnWalletPosition } from "@sdp/types/earn";
 import type { EarnCoreStrategy } from "@sdp/types/earn-core";
+import { earnStrategyParticipation } from "@sdp/types/provider-access";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWindowPathname } from "@/test/window-location";
 import {
@@ -59,6 +60,7 @@ describe("last verified vault values", () => {
 
 function strategy(id: string): EarnCoreStrategy {
   return {
+    ...earnStrategyParticipation("kamino"),
     id,
     provider: "kamino",
     providerReference: `${id}-ref`,

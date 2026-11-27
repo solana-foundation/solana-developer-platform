@@ -61,6 +61,8 @@ export type PreparedStrategySigningTarget = Pick<
   EarnWalletTransactionRow,
   | "id"
   | "owner_address"
+  | "provider"
+  | "vault_address"
   | "unsigned_transaction"
   | "last_valid_block_height"
   | "fee_mode"

@@ -2,6 +2,7 @@
 
 import type { EarnVaultPosition } from "@sdp/types/earn";
 import type { Operation } from "@sdp/types/operations";
+import { earnStrategyParticipation } from "@sdp/types/provider-access";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useEffectEvent } from "react";
@@ -187,6 +188,7 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (i
           ? undefined
           : [
               {
+                ...earnStrategyParticipation("kamino"),
                 id: "earn_strategy_mainnet_mirror",
                 provider: "kamino",
                 providerReference: "KvaultMainnet111111111111111111111111111111",
@@ -209,6 +211,7 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (i
               // offers, from the same provider. RockawayX is deliberately
               // absent — the devnet vault mapping to it must stay hidden.
               {
+                ...earnStrategyParticipation("kamino"),
                 id: "earn_strategy_mainnet_steakhouse",
                 provider: "kamino",
                 providerReference: "KvaultMainnetSteakhouse1111111111111111111",
@@ -227,6 +230,7 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (i
                 updatedAt: "2026-08-18T00:00:00.000Z",
               },
               {
+                ...earnStrategyParticipation("kamino"),
                 id: "earn_strategy_mainnet_allez",
                 provider: "kamino",
                 providerReference: "KvaultMainnetAllez1111111111111111111111",
@@ -259,6 +263,7 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (i
         ? undefined
         : [
             {
+              ...earnStrategyParticipation("kamino"),
               id: "earn_strategy_live",
               provider: "kamino",
               providerReference: "Kvault11111111111111111111111111111111111",
@@ -277,6 +282,7 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (i
               updatedAt: "2026-08-18T00:00:00.000Z",
             },
             {
+              ...earnStrategyParticipation("kamino"),
               id: "earn_strategy_catalogue_only",
               provider: "kamino",
               providerReference: "KvaultCatalogue1111111111111111111111111111",
@@ -300,6 +306,7 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (i
             // hides it (the rough-name intersection), so nothing below may
             // treat it as rendered.
             {
+              ...earnStrategyParticipation("kamino"),
               id: "earn_strategy_devnet_only",
               provider: "kamino",
               providerReference: "KvaultDevnetOnly11111111111111111111111111",
@@ -321,6 +328,7 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (i
             // never lists: the catalogue check must veto the mapping, so this
             // row stays off the Sandbox shelf too (the RockawayX case).
             {
+              ...earnStrategyParticipation("kamino"),
               id: "earn_strategy_rockaway_devnet",
               provider: "kamino",
               providerReference: "KvaultRockaway11111111111111111111111111",
@@ -342,6 +350,7 @@ vi.mock("@/app/(session)/dashboard/[projectId]/markets/earn/earn-data", async (i
             // name its redemption delay and the APY cell must stay a
             // placeholder, never a fabricated rate.
             {
+              ...earnStrategyParticipation("veda"),
               id: "earn_strategy_delayed_fund",
               provider: "veda",
               providerReference: "VedaFund1111111111111111111111111111111111",

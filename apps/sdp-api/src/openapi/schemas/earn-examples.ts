@@ -1,4 +1,5 @@
 import type { EarnStrategy } from "@sdp/types/earn";
+import { earnStrategyParticipation } from "@sdp/types/provider-access";
 import { WELL_KNOWN_TOKENS } from "@sdp/types/well-known-tokens";
 
 /** Stable identities shared by the core contract examples. */
@@ -11,6 +12,7 @@ const IDS = EARN_EXAMPLE_IDS;
 export const EARN_OWNER_ADDRESS_EXAMPLE = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 
 export const EARN_STRATEGY_EXAMPLE = {
+  ...earnStrategyParticipation("kamino"),
   id: IDS.mainnetStrategy,
   provider: "kamino",
   providerReference: "BEEfo7xwgK2ZP13Pxo7qqTPzAteKJmXjVWtMWcXSvbn2",

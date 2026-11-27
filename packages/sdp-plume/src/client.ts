@@ -8,9 +8,14 @@ import {
 } from "@sdp/earn/providers/plume/api";
 import { PlumeEarnClient } from "@sdp/earn/providers/plume/client";
 import type {
+  EarnProviderRedemptionModesProvider,
+  EarnProviderSettlementCandidate,
+  EarnProviderSettlementInput,
+  EarnProviderSettlementProvider,
   EarnRuntimeContext,
   EarnVaultDepositInput,
   EarnVaultDirectProvider,
+  EarnVaultOperationRunner,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultProviderOrderWithdrawProvider,
@@ -27,6 +32,7 @@ import {
   formatDecimalAmount,
   TokenAmountError,
 } from "@sdp/solana/amount";
+import type { EarnProviderRedemptionMode } from "@sdp/types/earn-provider-orders";
 import { PLUME_PROGRAMS, PLUME_VAULTS, plumeVault } from "@sdp/types/plume-programs";
 import { EARN_PROVIDER_DESCRIPTORS } from "@sdp/types/provider-access";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types/well-known-programs";
@@ -38,11 +44,7 @@ import {
 import type { z } from "zod";
 import { readPlumeVault } from "./chain";
 import { SdpPlumeError } from "./errors";
-import {
-  assertPlumeOperationActive,
-  type PlumeOperationRunner,
-  withPlumeOperation,
-} from "./operation";
+import { assertPlumeOperationActive, withPlumeOperation } from "./operation";
 import { admitPlumeTransaction } from "./plan";
 
 function amount(value: string, decimals: number, numeric: boolean) {
@@ -82,10 +84,14 @@ function configuration(ctx: EarnRuntimeContext, reference: string) {
 
 export class PlumeVaultDirectClient
   extends PlumeEarnClient
-  implements EarnVaultDirectProvider, EarnVaultProviderOrderWithdrawProvider
+  implements
+    EarnVaultDirectProvider,
+    EarnVaultProviderOrderWithdrawProvider,
+    EarnProviderSettlementProvider,
+    EarnProviderRedemptionModesProvider
 {
   constructor(
-    private readonly runOperation: PlumeOperationRunner = async (_label, operation) =>
+    private readonly runOperation: EarnVaultOperationRunner = async (_label, operation) =>
       operation(() => undefined)
   ) {
     super();
@@ -104,7 +110,7 @@ export class PlumeVaultDirectClient
     }
   }
 
-  getProviderRedemptionModes() {
+  getProviderRedemptionModes(): readonly EarnProviderRedemptionMode[] {
     return ["standard", "instant"] as const;
   }
   readonly vaultWithdrawalSettlement = EARN_PROVIDER_DESCRIPTORS.plume.withdrawalSettlement;
@@ -260,13 +266,8 @@ export class PlumeVaultDirectClient
 
   readProviderSettlement(
     ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceSignature: string;
-      direction: "deposit" | "withdrawal";
-    }
-  ) {
+    input: EarnProviderSettlementInput
+  ): Promise<EarnProviderSettlementCandidate> {
     return this.run("Plume readProviderSettlement", () =>
       this.readProviderSettlementInternal(ctx, input)
     );
@@ -274,13 +275,8 @@ export class PlumeVaultDirectClient
 
   private async readProviderSettlementInternal(
     ctx: EarnRuntimeContext,
-    input: {
-      providerReference: string;
-      owner: string;
-      sourceSignature: string;
-      direction: "deposit" | "withdrawal";
-    }
-  ) {
+    input: EarnProviderSettlementInput
+  ): Promise<EarnProviderSettlementCandidate> {
     const { vault, depositMint } = configuration(ctx, input.providerReference);
     const schema = input.direction === "deposit" ? plumeMintStatusSchema : plumeRedeemStatusSchema;
     let result: z.output<typeof plumeMintStatusSchema>;

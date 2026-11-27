@@ -4,14 +4,10 @@ import {
   supportsVaultWithdraw,
   supportsVaultWithdrawQuote,
 } from "@sdp/earn/capabilities";
-import type { EarnRuntimeEnvironment } from "@sdp/earn/types";
+import type { EarnRuntimeEnvironment, EarnVaultOperationRunner } from "@sdp/earn/types";
 import { address } from "@solana/kit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  KaminoVaultDirectClient,
-  type KaminoVaultOperationRunner,
-  toEarnVaultTransactionPlan,
-} from "./client";
+import { KaminoVaultDirectClient, toEarnVaultTransactionPlan } from "./client";
 import type { KaminoInstructionPlan, KaminoPosition, KaminoRuntime } from "./types";
 
 const DEPOSIT_TOKEN_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -62,7 +58,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-const runOperation: KaminoVaultOperationRunner = (_label, operation) => operation(() => undefined);
+const runOperation: EarnVaultOperationRunner = (_label, operation) => operation(() => undefined);
 const client = new KaminoVaultDirectClient(async () => "https://example.invalid", runOperation);
 
 describe("KaminoVaultDirectClient capabilities", () => {

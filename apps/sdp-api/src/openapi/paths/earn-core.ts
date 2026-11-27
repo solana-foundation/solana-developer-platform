@@ -43,7 +43,7 @@ export function registerEarnCorePaths(registry: OpenAPIRegistry, publicOnly = fa
     operationId: "discoverEarnStrategies",
     summary: "Discover strategies",
     description:
-      "Lists the strategies you can deposit into, with their rates and capabilities. rate.value is the provider-reported APY as a decimal fraction; null means unknown, not zero. capabilities.deposit is false for discovery-only rows, and preparation still checks admission live for each wallet.",
+      "Lists offered strategies with their rates and capabilities; hidden providers are excluded even when their catalogue rows remain indexed. Catalogue ingestion normally runs hourly. Visibility changes to indexed rows apply without waiting for ingestion; responses permit 30 seconds of private caching. Hiding a provider or disabling new deposits does not apply those deposit restrictions to existing-position withdrawals. rate.value is the provider-reported APY as a decimal fraction; null means unknown, not zero. capabilities.deposit is false for discovery-only rows, and preparation still checks admission live for each wallet.",
     request: { headers: projectScopeHeaders, query: earnDiscoveryQuerySchema },
     responses: {
       200: { description: "One catalogue page", content: jsonContent(earnDiscoveryResponseSchema) },

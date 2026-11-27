@@ -1,5 +1,7 @@
 import { HastraEarnClient } from "@sdp/earn/providers/hastra/client";
+import { buildSwapLegWithFloor, EarnSwapFloorError } from "@sdp/earn/swap-floor";
 import type {
+  EarnProvenRpcResolver,
   EarnRuntimeContext,
   EarnSwapLeg,
   EarnSwapPort,
@@ -9,6 +11,7 @@ import type {
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultInstruction,
+  EarnVaultOperationRunner,
   EarnVaultParRedemptionCancelInput,
   EarnVaultParRedemptionLifecycleEvent,
   EarnVaultParRedemptionLifecycleInput,
@@ -99,7 +102,7 @@ import {
   loadHastraState,
   readHastraState,
 } from "./state";
-import type { HastraRuntime, HastraVaultOperationRunner } from "./types";
+import type { HastraRuntime } from "./types";
 
 export class HastraVaultDirectClient
   extends HastraEarnClient
@@ -111,11 +114,8 @@ export class HastraVaultDirectClient
     EarnVaultParRedemptionProvider
 {
   constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
-    private readonly runOperation: HastraVaultOperationRunner,
+    private readonly resolveProvenRpcUrl: EarnProvenRpcResolver,
+    private readonly runOperation: EarnVaultOperationRunner,
     private readonly resolveSwapPort: (ctx: EarnRuntimeContext) => EarnSwapPort
   ) {
     super();
@@ -488,52 +488,53 @@ export class HastraVaultDirectClient
         cause,
       });
     }
-    if (quoteAtoms < args.floor.atoms) {
+    try {
+      return await buildSwapLegWithFloor({
+        quote: { text: quote.outAmount, atoms: quoteAtoms },
+        minimumOutput: args.floor.atoms,
+        assertActive: args.assertActive,
+        build: async (slippageBps) => {
+          const leg = await args.swapPort.buildSwapLeg({
+            cluster: args.runtime.cluster,
+            inputMint: args.config.deployment.wYldsMint,
+            outputMint: args.config.depositMint,
+            amount: args.amount.text,
+            owner: args.owner,
+            payer: args.payer,
+            slippageBps,
+            maxAccounts: HASTRA_JUPITER_MAX_ACCOUNTS,
+          });
+          if (leg.instructions.length === 0) {
+            throw new SdpHastraError(
+              "SWAP_UNAVAILABLE",
+              "Jupiter returned no executable instructions for the wYLDS exit."
+            );
+          }
+          let thresholdAtoms: bigint;
+          try {
+            thresholdAtoms = canonicalAmount(leg.minOutAmount, "Jupiter guaranteed output").atoms;
+          } catch (cause) {
+            throw new SdpHastraError(
+              "SWAP_UNAVAILABLE",
+              "Jupiter returned an invalid guaranteed output.",
+              { cause }
+            );
+          }
+          return {
+            value: leg,
+            minimumOutput: { text: leg.minOutAmount, atoms: thresholdAtoms },
+          };
+        },
+      });
+    } catch (cause) {
+      if (!(cause instanceof EarnSwapFloorError)) throw cause;
       throw new SdpHastraError(
         "WITHDRAW_REFUSED",
-        `The wYLDS market pays ${quote.outAmount} USDC, below the requested ${args.floor.text} floor.`
+        cause.stage === "quote"
+          ? `The wYLDS market pays ${quote.outAmount} USDC, below the requested ${args.floor.text} floor.`
+          : `Jupiter's guaranteed output ${cause.availableAmount} is below the requested ` +
+              `${args.floor.text} floor even at zero tolerance.`
       );
-    }
-    let slippageBps = Number(((quoteAtoms - args.floor.atoms) * 10_000n) / quoteAtoms);
-    slippageBps = Math.min(slippageBps, 9_999);
-
-    for (;;) {
-      args.assertActive();
-      const leg = await args.swapPort.buildSwapLeg({
-        cluster: args.runtime.cluster,
-        inputMint: args.config.deployment.wYldsMint,
-        outputMint: args.config.depositMint,
-        amount: args.amount.text,
-        owner: args.owner,
-        payer: args.payer,
-        slippageBps,
-        maxAccounts: HASTRA_JUPITER_MAX_ACCOUNTS,
-      });
-      if (leg.instructions.length === 0) {
-        throw new SdpHastraError(
-          "SWAP_UNAVAILABLE",
-          "Jupiter returned no executable instructions for the wYLDS exit."
-        );
-      }
-      let thresholdAtoms: bigint;
-      try {
-        thresholdAtoms = canonicalAmount(leg.minOutAmount, "Jupiter guaranteed output").atoms;
-      } catch (cause) {
-        throw new SdpHastraError(
-          "SWAP_UNAVAILABLE",
-          "Jupiter returned an invalid guaranteed output.",
-          { cause }
-        );
-      }
-      if (thresholdAtoms >= args.floor.atoms) return leg;
-      if (slippageBps === 0) {
-        throw new SdpHastraError(
-          "WITHDRAW_REFUSED",
-          `Jupiter's guaranteed output ${leg.minOutAmount} is below the requested ` +
-            `${args.floor.text} floor even at zero tolerance.`
-        );
-      }
-      slippageBps = 0;
     }
   }
 
@@ -582,7 +583,10 @@ export class HastraVaultDirectClient
       const freeWylds = wylds && wylds.amount > pledged ? wylds.amount - pledged : 0n;
       if (readAll && atoms === 0n && freeWylds === 0n) return [];
       const shares = formatAtoms(atoms);
-      const parValue = formatAtoms(assetsForShares(atoms, state.stakePrice));
+      const parValue =
+        atoms === 0n || (state.stakePrice.price > 0n && state.stakePrice.timestamp > 0n)
+          ? formatAtoms(assetsForShares(atoms, state.stakePrice))
+          : undefined;
       return [
         {
           providerReference: config.deployment.primeMint,

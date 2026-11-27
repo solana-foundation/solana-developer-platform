@@ -1,5 +1,7 @@
 import { OndoEarnClient } from "@sdp/earn/providers/ondo/client";
+import { buildSwapLegWithFloor, EarnSwapFloorError } from "@sdp/earn/swap-floor";
 import type {
+  EarnProvenRpcResolver,
   EarnRuntimeContext,
   EarnSwapLeg,
   EarnSwapPort,
@@ -9,6 +11,7 @@ import type {
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultInstruction,
+  EarnVaultOperationRunner,
   EarnVaultPositionInput,
   EarnVaultPositionSnapshot,
   EarnVaultTransactionPlan,
@@ -32,7 +35,7 @@ import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/type
 import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types/well-known-tokens";
 import { isAddress } from "@solana/kit";
 import { SdpOndoError } from "./errors";
-import type { OndoRuntime, OndoVaultOperationRunner } from "./types";
+import type { OndoRuntime } from "./types";
 
 /**
  * Ondo as an EXECUTING provider: the catalogue client plus the vault-direct,
@@ -184,11 +187,8 @@ export class OndoVaultDirectClient
    * (see `EarnSwapPort`). Nothing here reads `ctx.env` directly.
    */
   constructor(
-    private readonly resolveProvenRpcUrl: (
-      ctx: EarnRuntimeContext,
-      cluster: SolanaCluster
-    ) => Promise<string>,
-    private readonly runOperation: OndoVaultOperationRunner,
+    private readonly resolveProvenRpcUrl: EarnProvenRpcResolver,
+    private readonly runOperation: EarnVaultOperationRunner,
     /**
      * Resolved per request like the RPC endpoint: the port's implementation
      * reads platform credentials (the Jupiter swap key) from the request's
@@ -487,39 +487,39 @@ export class OndoVaultDirectClient
       amount: args.amount.text,
     });
     const quoteAtoms = parseDecimalAmount(quote.outAmount, TOKEN_DECIMALS);
-    if (quoteAtoms < args.floor.atoms) {
+    try {
+      return await buildSwapLegWithFloor({
+        quote: { text: quote.outAmount, atoms: quoteAtoms },
+        minimumOutput: args.floor.atoms,
+        assertActive: args.assertActive,
+        build: async (slippageBps) => {
+          const leg = await args.swapPort.buildSwapLeg({
+            cluster: args.runtime.cluster,
+            inputMint: args.inputMint,
+            outputMint: args.outputMint,
+            amount: args.amount.text,
+            owner: args.owner,
+            slippageBps,
+          });
+          return {
+            value: leg,
+            minimumOutput: {
+              text: leg.minOutAmount,
+              atoms: parseDecimalAmount(leg.minOutAmount, TOKEN_DECIMALS),
+            },
+          };
+        },
+      });
+    } catch (cause) {
+      if (!(cause instanceof EarnSwapFloorError)) throw cause;
       throw new SdpOndoError(
         refusalCode,
-        `The market pays ${quote.outAmount} right now, below the requested floor of ` +
-          `${args.floor.text}; re-quote and choose a floor the market can meet.`
+        cause.stage === "quote"
+          ? `The market pays ${quote.outAmount} right now, below the requested floor of ` +
+              `${args.floor.text}; re-quote and choose a floor the market can meet.`
+          : `The route's guaranteed output ${cause.availableAmount} is below the requested floor ` +
+              `${args.floor.text} even with zero tolerance; the market moved — re-quote.`
       );
-    }
-
-    let slippageBps = Number(((quoteAtoms - args.floor.atoms) * 10_000n) / quoteAtoms);
-    slippageBps = Math.min(slippageBps, 9_999);
-
-    for (;;) {
-      args.assertActive();
-      const leg = await args.swapPort.buildSwapLeg({
-        cluster: args.runtime.cluster,
-        inputMint: args.inputMint,
-        outputMint: args.outputMint,
-        amount: args.amount.text,
-        owner: args.owner,
-        slippageBps,
-      });
-      const thresholdAtoms = parseDecimalAmount(leg.minOutAmount, TOKEN_DECIMALS);
-      if (thresholdAtoms >= args.floor.atoms) return leg;
-      if (slippageBps === 0) {
-        throw new SdpOndoError(
-          refusalCode,
-          `The route's guaranteed output ${leg.minOutAmount} is below the requested floor ` +
-            `${args.floor.text} even with zero tolerance; the market moved — re-quote.`
-        );
-      }
-      // The build's own, fresher quote sat below ours: tighten and try once
-      // more from zero rather than walking down one basis point at a time.
-      slippageBps = 0;
     }
   }
 

@@ -13,6 +13,7 @@ import {
   wisdomTreeModeratorSchema,
   wisdomTreeOnboardingRecoverySchema,
 } from "./onboarding-schemas";
+import { type WisdomTreeOrderDetails, wisdomTreeOrderDetailsSchema } from "./order-schemas";
 
 /**
  * WisdomTree Connect REST client — the HTTP half of the integration, shared by
@@ -249,6 +250,37 @@ async function connectGetJson<TResponse>(
     access = await getWisdomTreeAccessToken(ctx);
     return request(access.token);
   }
+}
+
+/**
+ * Read the OAuth-accessible order for one recorded source transaction.
+ * Missing or inaccessible orders stay pending; observation never creates or
+ * updates an order, fetches missing hashes, or rechecks money-in eligibility.
+ */
+export async function getWisdomTreeOrderByHash(
+  ctx: EarnRuntimeContext,
+  sourceSignature: string
+): Promise<WisdomTreeOrderDetails | null> {
+  let response: unknown;
+  try {
+    response = await connectGetJson<unknown>(
+      ctx,
+      `/api/orders/hash/${encodeURIComponent(sourceSignature)}`
+    );
+  } catch (error) {
+    if (
+      error instanceof SdpEarnError &&
+      (error.details?.providerStatus === 403 || error.details?.providerStatus === 404)
+    ) {
+      return null;
+    }
+    throw error;
+  }
+  const parsed = wisdomTreeOrderDetailsSchema.safeParse(response);
+  if (!parsed.success) {
+    throw providerUnavailable("WisdomTree returned a malformed order response");
+  }
+  return parsed.data;
 }
 
 export interface WisdomTreeProduct {

@@ -1,5 +1,6 @@
-import type { EarnCorePosition } from "@sdp/types/earn-core";
+import type { EarnCorePosition, EarnCoreStrategy } from "@sdp/types/earn-core";
 import type { Operation } from "@sdp/types/operations";
+import { earnStrategyParticipation } from "@sdp/types/provider-access";
 import { describe, expect, it, vi } from "vitest";
 import { createEarnClient, type EarnApiError } from "./earn-client";
 
@@ -30,7 +31,66 @@ function operation(): Operation {
   };
 }
 
+function strategy(): EarnCoreStrategy {
+  return {
+    ...earnStrategyParticipation("kamino", { requiresKyc: false }),
+    id: "strategy",
+    provider: "kamino",
+    providerReference: "vault",
+    name: "Indexed strategy",
+    sourceKind: "defi",
+    depositMints: ["usdc"],
+    apyType: "variable",
+    liquidityTerm: "instant",
+    status: "active",
+    depositSlippage: null,
+    withdrawalSlippage: null,
+    hostCluster: "devnet",
+    fundable: true,
+    feeSponsored: false,
+    createdAt: "2026-11-18T12:00:00.000Z",
+    updatedAt: "2026-11-18T12:00:00.000Z",
+    rate: {
+      value: null,
+      measure: "apy",
+      basis: "provider_reported",
+      observedAt: null,
+      source: { provider: "kamino", providerReference: "vault" },
+    },
+    capabilities: { deposit: true, withdraw: true, admission: "evaluated_on_prepare" },
+  };
+}
+
 describe("Earn core client", () => {
+  it("retains required participation fields, including explicit false and unknown", async () => {
+    const row = strategy();
+    const client = createEarnClient(async () =>
+      Response.json({ data: { strategies: [row], total: 1, page: 1, pageSize: 100 } })
+    );
+    const result = await client.discovery();
+    expect(result.strategies[0]).toMatchObject({
+      requiresKyc: false,
+      requiresKyb: null,
+      geographicallyRestricted: true,
+      termsUrl: row.termsUrl,
+    });
+  });
+
+  it("rejects discovery without required participation metadata", async () => {
+    const row = { ...strategy(), requiresKyc: undefined };
+    const client = createEarnClient(async () =>
+      Response.json({ data: { strategies: [row], total: 1, page: 1, pageSize: 100 } })
+    );
+    await expect(client.discovery()).rejects.toThrow();
+  });
+
+  it("rejects unsafe terms links at the dashboard response boundary", async () => {
+    const row = { ...strategy(), termsUrl: "javascript:alert(1)" };
+    const client = createEarnClient(async () =>
+      Response.json({ data: { strategies: [row], total: 1, page: 1, pageSize: 100 } })
+    );
+    await expect(client.discovery()).rejects.toThrow();
+  });
   it("reads a single position with the same source and unknown-value contract as the list", async () => {
     const position: EarnCorePosition = {
       id: "discovered/owner position",

@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { assertFireblocksProposal } from "@sdp/custody/testing/fireblocks-proposal";
+import type { EarnVaultOperationRunner } from "@sdp/earn/types";
 import { address } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { VedaVaultDirectClient, type VedaVaultOperationRunner } from "./client";
+import { VedaVaultDirectClient } from "./client";
 import depositWithdraw from "./fixtures/devnet-deposit-withdraw.json";
 import positionRead from "./fixtures/devnet-position-read.json";
 import queuedWithdrawal from "./fixtures/devnet-queued-withdrawal.json";
@@ -217,7 +218,7 @@ function recordedChain(recording: Recording) {
   };
 }
 
-const runOperation: VedaVaultOperationRunner = (_label, operation) => operation(() => undefined);
+const runOperation: EarnVaultOperationRunner = (_label, operation) => operation(() => undefined);
 const sandbox = { env: {}, environment: "sandbox" } as const;
 let endpoint = 0;
 

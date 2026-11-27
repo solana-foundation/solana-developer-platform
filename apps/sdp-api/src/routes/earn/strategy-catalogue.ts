@@ -5,6 +5,7 @@ import type { EarnStrategy } from "@sdp/types/earn";
 import {
   type EarnProviderId,
   earnDepositSlippagePolicy,
+  earnStrategyParticipation,
   earnWithdrawSlippageFloor,
   isEarnProviderSurfaced,
   SURFACED_EARN_PROVIDERS,
@@ -80,6 +81,7 @@ export function mapToEarnStrategy(
       : earnWithdrawSlippageFloor(row.provider);
   const fundable = isClusterFundableInEnvironment(row.host_cluster, environment);
   return {
+    ...earnStrategyParticipation(row.provider, row.risk_metadata.participation),
     id: row.id,
     provider: row.provider,
     providerReference: row.provider_reference,

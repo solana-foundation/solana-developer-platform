@@ -14,7 +14,7 @@ tenancy, custody, signing, fees, RPC, webhooks, cron, compliance, API-key grants
 audit all already exist and are reused. For the
 step-by-step of changing what Earn offers (provider / vault / category /
 custodian), see the
-[Earn pluggability playbook](../contributing/earn-pluggability-playbook.md).
+[Earn pluggability playbook](../../packages/sdp-earn/src/providers/AGENTS.md).
 
 ## System context
 
