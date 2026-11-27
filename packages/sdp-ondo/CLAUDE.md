@@ -86,14 +86,14 @@ provider limits with one limit for the complete plan. Appending a second
 ## The floor is proven, not encoded
 
 Jupiter encodes a quote plus a tolerance, never an arbitrary floor. The shared
-`buildSwapLegWithFloor` helper (`@sdp/earn/swap-floor`) derives
-`bps = ⌊(quote − floor)/quote·10⁴⌋`, then proves the built leg's threshold
-covers the caller's floor. It retries once at zero tolerance. Ondo retains mint/amount
-parsing and maps refusal to `DEPOSIT_REFUSED`/`WITHDRAW_REFUSED`. The normal
-path remains one quote and one build; retry adds one build and no Solana RPC.
+`buildSwapLegWithFloor` helper (`@sdp/earn/swap-floor`) derives tolerance from
+the live quote and approved floor, then verifies the built leg's threshold.
+It retries once at zero tolerance. Ondo retains mint/amount parsing and maps
+refusal to `DEPOSIT_REFUSED`/`WITHDRAW_REFUSED`. The normal path remains one
+quote and one build; retry adds one build and no Solana RPC.
 
-`accepted` reports the caller's floor: the encoded threshold is at or above it,
-so the ledger claim stays conservative and exact against the API's policy
+`accepted` reports the caller's floor: the encoded threshold is at or above
+it, so the ledger claim stays conservative and exact against the API's policy
 check (`requireAcceptedPlan` demands equality with the approved request).
 
 `minSharesOut`/`minAmountOut` are refused-if-absent (Veda's rule): a floor
