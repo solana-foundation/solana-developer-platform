@@ -286,15 +286,15 @@ coverage policy with the retained tracked-position exit path.
 All deployment times below mean the new revision is actually serving, not just
 that code was merged. These are healthy-path ingestion intervals, not an SLA.
 
-| Change | First effect |
-| --- | --- |
-| New provider or newly listed strategy | First successful catalogue ingestion, normally within about 64 minutes plus processing, followed by applicable offering/admission checks. |
-| Hide or restore already indexed provider | Fresh API request after API rollout; no catalogue sync required. |
-| Queued deposit after a hide | Next worker advance under the updated cron revision; backoff can delay that observation. |
-| Provider participation default | Fresh API read after rollout; existing rows need no resync. |
-| Strategy-specific metadata from provider snapshot | Next successful catalogue ingestion. |
-| Organization entitlement | Next admission read after the authorized settings change; discovery is unchanged. |
-| Live rate/TVL metrics | Five-minute refresh for providers implementing live metrics; otherwise the catalogue cadence. Metrics cannot admit new strategies. |
+| Change                                            | First effect                                                                                                                              |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| New provider or newly listed strategy             | First successful catalogue ingestion, normally within about 64 minutes plus processing, followed by applicable offering/admission checks. |
+| Hide or restore already indexed provider          | Fresh API request after API rollout; no catalogue sync required.                                                                          |
+| Queued deposit after a hide                       | Next worker advance under the updated cron revision; backoff can delay that observation.                                                  |
+| Provider participation default                    | Fresh API read after rollout; existing rows need no resync.                                                                               |
+| Strategy-specific metadata from provider snapshot | Next successful catalogue ingestion.                                                                                                      |
+| Organization entitlement                          | Next admission read after the authorized settings change; discovery is unchanged.                                                         |
+| Live rate/TVL metrics                             | Five-minute refresh for providers implementing live metrics; otherwise the catalogue cadence. Metrics cannot admit new strategies.        |
 
 `earn-catalogue-sync.ts` checks every five minutes and attempts on worker start,
 but `EARN_CATALOGUE_SYNC_SLOT_TTL_SECONDS = 3540` limits ingestion to roughly
