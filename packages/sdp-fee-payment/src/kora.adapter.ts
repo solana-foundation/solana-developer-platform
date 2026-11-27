@@ -5,6 +5,7 @@
  * The platform sponsors all transaction fees via Kora's fee payer.
  */
 
+import { createIdentityTokenProvider } from "@sdp/metadata-server/caller";
 import { type Address, assertIsAddress } from "@solana/kit";
 import {
   type Config,
@@ -64,9 +65,6 @@ const FEE_PAYER_ADDRESS_TTL_MS = 5 * 60_000;
  */
 const feePayerAddresses = createProcessCache<Address>(() => Date.now() + FEE_PAYER_ADDRESS_TTL_MS);
 
-/** Cloud Run audience to its identity token, refreshed a minute before it expires. */
-const identityTokens = createProcessCache<string>((token) => resolveTokenRefreshAt(token));
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Adapter Implementation
 // ═══════════════════════════════════════════════════════════════════════════
@@ -86,14 +84,17 @@ export class KoraAdapter implements FeePaymentPort {
     if (config.identityTokenProvider && !identityTokenAudience) {
       throw new Error("identityTokenAudience is required with an identityTokenProvider");
     }
-    if (identityTokenAudience) {
-      assertCloudRunIdentityDestination(rpcUrl, identityTokenAudience);
-    }
-    const identityTokenProvider =
-      config.identityTokenProvider ??
-      (identityTokenAudience
-        ? createCloudRunIdentityTokenProvider(identityTokenAudience)
-        : undefined);
+    // The destination check runs even when a provider is injected: it is what keeps a token for
+    // one audience from being sent to another origin.
+    const metadataTokenProvider = identityTokenAudience
+      ? createIdentityTokenProvider({
+          url: rpcUrl,
+          audience: identityTokenAudience,
+          urlSetting: "KORA_<CLUSTER>_URL",
+          audienceSetting: "KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE",
+        })
+      : undefined;
+    const identityTokenProvider = config.identityTokenProvider ?? metadataTokenProvider;
     this.client =
       config.client ??
       (identityTokenProvider
@@ -596,93 +597,6 @@ class AuthorizedKoraClient implements KoraClientTransport {
       throw new Error("Kora RPC response did not include a result");
     }
     return payload.result;
-  }
-}
-
-function createCloudRunIdentityTokenProvider(audience: string): () => Promise<string> {
-  const normalizedAudience = audience.trim();
-  if (!normalizedAudience) {
-    throw new Error("KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE cannot be empty");
-  }
-
-  return () =>
-    identityTokens.get(normalizedAudience, () => fetchCloudRunIdentityToken(normalizedAudience));
-}
-
-/**
- * Mint a Google OIDC identity token for `audience` from the metadata server.
- *
- * @param audience - The private Cloud Run service the token authenticates to.
- * @returns The token.
- */
-async function fetchCloudRunIdentityToken(audience: string): Promise<string> {
-  const endpoint = new URL(
-    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
-  );
-  endpoint.searchParams.set("audience", audience);
-  endpoint.searchParams.set("format", "full");
-  // Bounded inside the shared load: a stalled fetch would otherwise hold the cache's in-flight
-  // entry, and every later request for the audience would wait on it. The signal also bounds the
-  // body read below.
-  const response = await fetch(endpoint, {
-    headers: { "Metadata-Flavor": "Google" },
-    signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    throw new Error(`Cloud Run identity token request failed with HTTP ${response.status}`);
-  }
-
-  const token = (await response.text()).trim();
-  if (!token) {
-    throw new Error("Cloud Run identity token response was empty");
-  }
-  return token;
-}
-
-function assertCloudRunIdentityDestination(rpcUrl: string, audience: string): void {
-  let destination: URL;
-  let trustedAudience: URL;
-  try {
-    destination = new URL(rpcUrl);
-    trustedAudience = new URL(audience);
-  } catch {
-    throw new Error("KORA_<CLUSTER>_URL and KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE must be valid URLs");
-  }
-
-  const hasCredentials =
-    destination.username ||
-    destination.password ||
-    trustedAudience.username ||
-    trustedAudience.password;
-  if (
-    destination.protocol !== "https:" ||
-    trustedAudience.protocol !== "https:" ||
-    destination.origin !== trustedAudience.origin ||
-    hasCredentials
-  ) {
-    throw new Error(
-      "KORA_<CLUSTER>_URL must use HTTPS and match the KORA_<CLUSTER>_CLOUD_RUN_AUDIENCE origin"
-    );
-  }
-}
-
-function resolveTokenRefreshAt(token: string): number {
-  try {
-    const payloadSegment = token.split(".")[1];
-    if (!payloadSegment) {
-      throw new Error("missing payload");
-    }
-    const payload = JSON.parse(new TextDecoder().decode(decodeBase64(payloadSegment))) as {
-      exp?: number;
-    };
-    if (!payload.exp) {
-      throw new Error("missing exp");
-    }
-    return Math.max(Date.now(), payload.exp * 1000 - 60_000);
-  } catch {
-    // Metadata identity tokens currently live for an hour. A short fallback
-    // cache avoids per-RPC metadata calls without assuming that full lifetime.
-    return Date.now() + 5 * 60_000;
   }
 }
 

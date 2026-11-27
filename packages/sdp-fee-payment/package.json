@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "@sdp/rpc": "workspace:*",
+    "@sdp/metadata-server": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana/kit": "catalog:",
     "@solana/kora": "0.3.0-beta.3"

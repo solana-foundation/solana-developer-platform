@@ -1,0 +1,32 @@
+{
+  "name": "@sdp/metadata-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./caller": {
+      "types": "./src/caller.ts",
+      "import": "./src/caller.ts",
+      "default": "./src/caller.ts"
+    },
+    "./receiver": {
+      "types": "./src/receiver.ts",
+      "import": "./src/receiver.ts",
+      "default": "./src/receiver.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "jose": "6.2.13",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3"
+  }
+}

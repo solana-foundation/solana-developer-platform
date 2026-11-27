@@ -51,6 +51,7 @@ COPY packages/sdp-ip/package.json ./packages/sdp-ip/
 # package and its workspace deps (@sdp/fee-payment) into the frozen-install closure.
 COPY packages/sdp-issuance/package.json ./packages/sdp-issuance/
 COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
+COPY packages/sdp-metadata-server/package.json ./packages/sdp-metadata-server/
 COPY packages/sdp-private-channels/package.json ./packages/sdp-private-channels/
 COPY patches ./patches
 
@@ -74,6 +75,7 @@ COPY packages/sdp-redaction ./packages/sdp-redaction
 COPY packages/sdp-ip ./packages/sdp-ip
 COPY packages/sdp-issuance ./packages/sdp-issuance
 COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
+COPY packages/sdp-metadata-server ./packages/sdp-metadata-server
 COPY packages/sdp-private-channels ./packages/sdp-private-channels
 
 # Public env (each var is also exposed via ENV so Next picks it up at build).

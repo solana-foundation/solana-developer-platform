@@ -27,6 +27,7 @@ COPY packages/sdp-dvp/package.json ./packages/sdp-dvp/
 COPY packages/sdp-earn/package.json ./packages/sdp-earn/
 COPY packages/sdp-payments/package.json ./packages/sdp-payments/
 COPY packages/sdp-fee-payment/package.json ./packages/sdp-fee-payment/
+COPY packages/sdp-metadata-server/package.json ./packages/sdp-metadata-server/
 COPY packages/sdp-rpc/package.json ./packages/sdp-rpc/
 COPY packages/sdp-custody/package.json ./packages/sdp-custody/
 COPY packages/sdp-redaction/package.json ./packages/sdp-redaction/
@@ -63,6 +64,7 @@ COPY packages/sdp-dvp ./packages/sdp-dvp
 COPY packages/sdp-earn ./packages/sdp-earn
 COPY packages/sdp-payments ./packages/sdp-payments
 COPY packages/sdp-fee-payment ./packages/sdp-fee-payment
+COPY packages/sdp-metadata-server ./packages/sdp-metadata-server
 COPY packages/sdp-rpc ./packages/sdp-rpc
 COPY packages/sdp-custody ./packages/sdp-custody
 COPY packages/sdp-redaction ./packages/sdp-redaction
