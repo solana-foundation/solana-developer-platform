@@ -38,6 +38,14 @@ Postman, AI resources and module map using their owning generators. Generated
 files must not be edited manually. The consumer integration guide lives at
 `apps/sdp-docs/content/docs/earn/integration-details.mdx`.
 
+Discovery publishes `requiresKyc`, `requiresKyb`, `geographicallyRestricted`
+and `termsUrl` on every strategy. Resolve verified strategy participation facts
+over provider defaults at the read projection. Missing/conditional requirements
+stay `null`, and explicit `false` never becomes unknown. Terms links must use
+HTTPS. These fields describe provider requirements, not a participant's live
+approval or SDP geofencing. Never use them as signing or withdrawal gates;
+provider eligibility and normal authorization remain separate.
+
 ## Preparation and authority
 
 `core/prepare.ts` resolves source ownership and the position's authoritative

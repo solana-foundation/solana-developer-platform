@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import type { EarnStrategy, EarnWalletPosition, EarnWalletPositionSummary } from "@sdp/types/earn";
+import { earnStrategyParticipation } from "@sdp/types/provider-access";
 import { SOL_MINT } from "@sdp/types/well-known-tokens";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -47,6 +48,7 @@ vi.mock("./earn-data", () => ({
 
 function strategyFixture(overrides: Partial<EarnStrategy> = {}): EarnStrategy {
   return {
+    ...earnStrategyParticipation(overrides.provider ?? "kamino"),
     id: "strategy_1",
     provider: "kamino",
     providerReference: "vault_1",

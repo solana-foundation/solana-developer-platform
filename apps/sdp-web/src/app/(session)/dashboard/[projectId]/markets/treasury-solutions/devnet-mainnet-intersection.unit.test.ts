@@ -1,9 +1,11 @@
 import type { EarnStrategy } from "@sdp/types/earn";
+import { earnStrategyParticipation } from "@sdp/types/provider-access";
 import { describe, expect, it } from "vitest";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 
 function strategy(overrides: Partial<EarnStrategy>): EarnStrategy {
   return {
+    ...earnStrategyParticipation(overrides.provider ?? "kamino"),
     id: "earn_strategy_test",
     provider: "kamino",
     providerReference: "Kvault11111111111111111111111111111111111",

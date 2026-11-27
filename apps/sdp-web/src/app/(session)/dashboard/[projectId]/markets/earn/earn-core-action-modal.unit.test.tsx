@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
+
 import type { EarnStrategy, EarnVaultPosition } from "@sdp/types/earn";
 import type { Operation } from "@sdp/types/operations";
+import { earnStrategyParticipation } from "@sdp/types/provider-access";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -73,6 +75,7 @@ function operation(overrides: Partial<Operation> = {}): Operation {
   };
 }
 const strategy: EarnStrategy = {
+  ...earnStrategyParticipation("provider"),
   id: "strategy",
   name: "Strategy",
   provider: "provider",

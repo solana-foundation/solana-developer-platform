@@ -21,6 +21,42 @@ OUSD PRIME (vault 5) identities already match main's shared deployment registry.
 Its atomic deposit/instant exit and separate solver queue were also reviewed;
 queue creation escrows shares and never claims payout.
 
+## Participation requirements and terms
+
+Every strategy now exposes `requiresKyc`, `requiresKyb`,
+`geographicallyRestricted` and `termsUrl`. Provider declarations supply defaults;
+typed `riskMetadata.participation` can override them per strategy. `null` keeps
+unknown or conditional requirements distinct from a confirmed `false`.
+WisdomTree's business route declares KYC/KYB; other providers remain unknown
+rather than treating permissionless access as an exemption.
+
+These fields describe published requirements. They do not report customer
+approval, perform geography checks, record acceptance or gate withdrawals.
+The terms URL starts a review; it cannot replace additional product agreements.
+All registered providers have verified terms links and published geographic
+restrictions. Those declarations do not enable the pre-launch integrations.
+
+Metadata validation passed 90 API contract, discovery, persistence and exit
+checks, plus 101 dashboard client, data, Treasury and surfacing tests. Shared
+types, Earn, API and dashboard typechecks passed. All four fields are required
+by OpenAPI and the dashboard parser; explicit `false` and `null` overrides
+survive metrics refresh. Existing rows gain defaults without a resync, with
+zero additional provider/RPC requests. Deploy the API producer before the
+stricter dashboard parser. No live customer verification or geofencing was run.
+
+RWA source verification, 2026-11-27:
+
+| Route | Terms | Requirement evidence |
+| --- | --- | --- |
+| WisdomTree Connect | [Portal/API terms](https://app.wisdomtreeconnect.com/web/order/terms-and-conditions) | Institutional onboarding includes beneficial-owner identity checks; market/jurisdiction restrictions apply. |
+| Ondo secondary USDY | [Provider terms](https://docs.ondo.finance/legal/terms-of-service) | [Bearer transfers do not require issuer onboarding](https://docs.ondo.finance/general-access-products/usdy/comparison-stablecoins); [acquisition eligibility still applies](https://docs.ondo.finance/general-access-products/usdy/eligibility). |
+| Hastra Solana | [Terms of Use](https://hastra.io/terms) | Terms restrict geography and reserve documentation requests. The [Solana guide](https://help.hastra.io/35f2339356548002a00ef2e113e44090) describes permissionless access with sanctions freezing. |
+| Plume/Nest | [Provider terms](https://www.plume.org/terms-of-service), [Nest product terms](https://docs.nest.credit/security-and-compliance/terms-and-conditions) | [Wallet AML screening](https://docs.nest.credit/security-and-compliance/aml) and [geographic restrictions](https://docs.nest.credit/security-and-compliance/geographic-restrictions) remain distinct from KYC/KYB. |
+
+Hastra's terms route is linked by its official footer. The current public
+site bundle contains the agreement text; its HTML shell alone is unreadable.
+This review verified the route and text without a signed-in browser session.
+
 ## Fixed locally
 
 - **Hastra unknown value was reported as zero.** A valid oracle configuration
@@ -199,6 +235,14 @@ Full workspace tests/builds, live provider transactions, production
 credentials/configuration and signed-in browser flows were not run.
 
 ## Primary sources
+
+Provider defaults also link to [Veda terms](https://veda.tech/terms),
+[Kamino terms](https://kamino.com/terms),
+[Jupiter terms](https://developers.jup.ag/docs/legal/terms-of-use),
+[Upshift terms](https://docs.upshift.finance/resources/legal/terms-of-use) and
+[Perena terms](https://perena.gitbook.io/perena/legal/terms-of-use).
+Jupiter Lend additionally publishes service terms through its
+[transparency page](https://jup.ag/lend/transparency).
 
 - [Hastra Solana guide](https://help.hastra.io/35f2339356548002a00ef2e113e44090)
 - [Hastra pinned oracle reset implementation](https://github.com/provenance-io/hastra-sol-vault/blob/121e4cc600b976a97faa018359e00bda48113ec2/programs/vault-stake/src/processor.rs#L690)

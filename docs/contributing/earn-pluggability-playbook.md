@@ -25,6 +25,29 @@ not itself need a migration. Extend the provider's `declaredSupport` too.
 Deposit mints must resolve through the shared well-known token catalogue.
 Discovery filters derive from the shared enums.
 
+Declare participation defaults with the provider descriptor: `requiresKyc`,
+`requiresKyb`, `geographicallyRestricted` and `termsUrl`. A catalogue snapshot
+can provide typed `riskMetadata.participation` overrides for a particular
+strategy. The API projects the resolved values as always-present top-level
+strategy fields; existing rows inherit provider defaults without a resync.
+
+Use `true` for source-confirmed requirements or restrictions, `false` only
+for confirmed absence on that route, and `null` for unknown or conditional
+cases. Do not infer no KYC from a permissionless transfer or no geographic
+restrictions from a keyless API. Terms links must be verified HTTPS provider
+or product terms, never a homepage standing in for an unknown agreement.
+Record source provenance when adding or changing these declarations.
+
+This is descriptive metadata, not customer approval or authorization. It does
+not add IP geofencing, terms acceptance storage or a withdrawal gate. Provider
+terms can be supplemented by product-specific agreements; one URL does not
+claim to enumerate all agreements.
+
+Deploy the API producer before the dashboard consumer: the shared dashboard
+schema requires all four fields and rejects older discovery payloads. Adding
+the metadata makes no provider or RPC calls; defaults apply to existing rows
+without waiting for a catalogue resync.
+
 `earn_strategies` rows are keyed by provider, provider reference and environment.
 The hourly `apps/sdp-api/src/cron/earn-catalogue-sync.ts` calls registered
 `listStrategies` clients, validates their declared support and admits rows

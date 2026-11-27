@@ -198,6 +198,13 @@ and wallet, confirm the issuer's rules on jurisdiction, investor qualification
 or accreditation, KYC/AML, subscriptions and redemptions. They differ by
 product, and Earn has no universal compliance approval or jurisdiction screen.
 
+Read `requiresKyc`, `requiresKyb`, `geographicallyRestricted` and `termsUrl`
+on each strategy before offering it. `true` confirms a requirement;
+`false` confirms it is not required for that route; `null` means unknown or
+conditional. These fields do not approve a customer, enforce geography or
+record agreement acceptance. The terms link is a starting point; additional
+product agreements can apply.
+
 Where a provider supports an eligibility check, Earn runs it before building the
 deposit and checks again before broadcasting, including after delayed custody
 signing. A refusal stops new broadcasts while Earn keeps observing any exposed

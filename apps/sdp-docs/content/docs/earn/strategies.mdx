@@ -57,7 +57,30 @@ already indexed rows do not wait for that update. Discovery responses may be
 cached for 30 seconds. Refresh or reload an open dashboard to update its list;
 the server checks deposit admission again when you prepare and execute.
 
-## Read the terms
+## Check participation requirements
+
+Every strategy includes `requiresKyc`, `requiresKyb`,
+`geographicallyRestricted` and `termsUrl`. These describe the supported
+strategy route and may differ between products from one provider.
+
+| Field | Meaning |
+| --- | --- |
+| `requiresKyc` | Whether individual identity verification is required. |
+| `requiresKyb` | Whether business verification is required. |
+| `geographicallyRestricted` | Whether published geographic restrictions apply. |
+| `termsUrl` | A verified HTTPS terms link, or `null` when unverified. |
+
+For the three flags, `true` means a confirmed requirement or restriction,
+`false` means confirmed not required, and `null` means unknown or conditional.
+Keep unknown values visible instead of treating them as `false`.
+
+These fields describe requirements, not your customer's approval status.
+`geographicallyRestricted` does not mean SDP performs an IP or jurisdiction
+check. A terms link does not record acceptance, and none of these fields adds
+a withdrawal gate. See [provider eligibility](/docs/earn/integration-details#provider-eligibility)
+for the live admission checks.
+
+## Read rates and withdrawal terms
 
 - `rate.value` is the provider-reported APY as a decimal fraction: `"0.062"` is
   6.2%. `null` means unknown, not zero. `rate.observedAt` is when the provider

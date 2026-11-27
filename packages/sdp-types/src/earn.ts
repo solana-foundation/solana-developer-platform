@@ -1,4 +1,8 @@
 import type { z } from "zod";
+import type {
+  EarnStrategyParticipation,
+  EarnStrategyParticipationOverrides,
+} from "./earn-participation";
 import type { earnBalanceReadContextSchema } from "./earn-wire";
 import type { SolanaCluster, WellKnownTokenSymbol } from "./well-known-tokens";
 import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
@@ -104,6 +108,8 @@ export type EarnStrategyStatus = (typeof EARN_STRATEGY_STATUSES)[number];
  * well-known fields the dashboard can render consistently.
  */
 export interface EarnStrategyRiskMetadata {
+  /** Verified strategy-specific facts; omitted fields inherit provider defaults. */
+  participation?: EarnStrategyParticipationOverrides;
   /** Open curator id — see EARN_KNOWN_CURATOR_LABELS for display mapping. */
   curator?: string;
   riskTier?: string;
@@ -118,7 +124,7 @@ export interface EarnStrategySlippagePolicy {
   defaultToleranceBps: number;
 }
 
-export interface EarnStrategy {
+export interface EarnStrategy extends EarnStrategyParticipation {
   id: string;
   /**
    * Strategy provider ID. Open string on the read model: catalogue rows

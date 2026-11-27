@@ -516,6 +516,15 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
   eligibility and metrics behavior live in optional capabilities. Detect each
   complete interface through its method-presence guard in capabilities.ts,
   never `instanceof` or provider-id checks. Do not add unused future interfaces.
+- Every strategy exposes `requiresKyc`, `requiresKyb`,
+  `geographicallyRestricted` and `termsUrl` from the shared
+  `earnStrategyParticipationSchema`. The provider descriptor owns defaults;
+  verified `riskMetadata.participation` facts may override them. Omitted fields
+  inherit, while explicit `false` and `null` replace the default. Unknown or
+  conditional requirements stay `null`; never infer no KYC from an ungated
+  transaction or Veda's compliance-mode flag. Geographic restrictions describe
+  provider terms, not SDP IP enforcement. This metadata neither authorizes a
+  deposit nor adds an exit gate; live issuer eligibility remains separate.
 - All USD/amount values in contract types are **decimal strings**; convert to
   wire numbers only at the provider HTTP boundary.
 - **An on-chain catalogue read takes its endpoint from `ctx.catalogueRpcUrl`**

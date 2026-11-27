@@ -4,6 +4,7 @@ import type {
   EarnDiscoveryResponse,
   EarnPositionsResponse,
 } from "@sdp/types/earn-core";
+import { earnStrategyParticipationSchema } from "@sdp/types/earn-participation";
 import { earnBalanceReadContextSchema } from "@sdp/types/earn-wire";
 import { SOLANA_CLUSTERS } from "@sdp/types/well-known-tokens";
 import { z } from "zod";
@@ -96,6 +97,7 @@ export const earnPositionsResponseSchema: z.ZodType<EarnPositionsResponse> = z.o
 export const earnDiscoveryResponseSchema: z.ZodType<EarnDiscoveryResponse> = z.object({
   strategies: z.array(
     z.looseObject({
+      ...earnStrategyParticipationSchema.shape,
       id: z.string(),
       provider: z.string(),
       providerReference: z.string(),

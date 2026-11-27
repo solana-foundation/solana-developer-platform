@@ -69,6 +69,11 @@
       "import": "./src/earn-core.ts",
       "default": "./src/earn-core.ts"
     },
+    "./earn-participation": {
+      "types": "./src/earn-participation.ts",
+      "import": "./src/earn-participation.ts",
+      "default": "./src/earn-participation.ts"
+    },
     "./earn-wire": {
       "types": "./src/earn-wire.ts",
       "import": "./src/earn-wire.ts",

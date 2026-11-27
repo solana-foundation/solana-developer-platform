@@ -1,3 +1,4 @@
+import { earnStrategyParticipationSchema } from "@sdp/types/earn-participation";
 import { z } from "zod";
 import { errorResponseSchema, isoDateTimeSchema, successResponseSchema } from "./base";
 import {
@@ -36,6 +37,7 @@ const earnStrategySlippagePolicySchema = z
 
 const earnStrategySchema = z
   .object({
+    ...earnStrategyParticipationSchema.shape,
     id: z.string().openapi({
       description: "The strategy's ID. Pass it as `strategyId` to prepare a deposit.",
       example: EARN_EXAMPLE_IDS.strategy,
