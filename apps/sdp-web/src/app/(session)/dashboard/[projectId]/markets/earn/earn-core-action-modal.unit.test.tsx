@@ -28,10 +28,11 @@ vi.mock("./deposit/earn-funding-wallets", () => ({
   }),
   walletDisplayName: () => "Treasury",
 }));
-vi.mock("@/lib/earn-core-data", () => ({
+vi.mock("@/lib/earn-core-data", async (importOriginal) => ({
+  // Spread the real module so `isEarnOperationTerminal` stays the shared
+  // predicate; only the client transport and the detail hook are doubles.
+  ...(await importOriginal<typeof import("@/lib/earn-core-data")>()),
   earnCoreClient: mocks,
-  isEarnOperationTerminal: (operation: Operation) =>
-    ["completed", "failed", "cancelled"].includes(operation.status),
   useEarnOperation: (_id: string, initial: Operation) => ({
     operation: initial,
     refresh: vi.fn(),

@@ -11,10 +11,11 @@ const feed = vi.hoisted(() => ({
   refresh: vi.fn(),
   loadMore: vi.fn(),
 }));
-vi.mock("@/lib/earn-core-data", () => ({
+vi.mock("@/lib/earn-core-data", async (importOriginal) => ({
+  // The real module keeps `isEarnOperationTerminal` grounded in the shared
+  // TERMINAL_OPERATION_STATUSES; only the feed hook is a double here.
+  ...(await importOriginal<typeof import("@/lib/earn-core-data")>()),
   useEarnOperations: () => feed,
-  isEarnOperationTerminal: (operation: Operation) =>
-    ["completed", "failed", "cancelled"].includes(operation.status),
 }));
 vi.mock("@/i18n/provider", () => ({
   useLocale: () => "en",
